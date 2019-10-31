@@ -11,7 +11,6 @@ import pluginReducers from 'app/features/plugins/state/reducers';
 import dataSourcesReducers from 'app/features/datasources/state/reducers';
 import userReducers from 'app/features/profile/state/reducers';
 import organizationReducers from 'app/features/org/state/reducers';
-import ldapReducers from 'app/features/admin/state/reducers';
 
 const rootReducers = {
   ...sharedReducers,
@@ -24,7 +23,6 @@ const rootReducers = {
   ...dataSourcesReducers,
   ...userReducers,
   ...organizationReducers,
-  ...ldapReducers,
 };
 
 const addedReducers = {};

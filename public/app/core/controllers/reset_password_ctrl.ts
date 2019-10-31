@@ -8,7 +8,6 @@ export class ResetPasswordCtrl {
   constructor($scope: any, backendSrv: BackendSrv, $location: any) {
     $scope.formModel = {};
     $scope.mode = 'send';
-    $scope.ldapEnabled = config.ldapEnabled;
     $scope.authProxyEnabled = config.authProxyEnabled;
     $scope.disableLoginForm = config.disableLoginForm;
 

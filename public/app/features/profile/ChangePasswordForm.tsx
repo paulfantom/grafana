@@ -42,10 +42,10 @@ export class ChangePasswordForm extends PureComponent<Props, State> {
   render() {
     const { oldPassword, newPassword, confirmNew } = this.state;
     const { isSaving } = this.props;
-    const { ldapEnabled, authProxyEnabled } = config;
+    const { authProxyEnabled } = config;
 
-    if (ldapEnabled || authProxyEnabled) {
-      return <p>You cannot change password when ldap or auth proxy authentication is enabled.</p>;
+    if authProxyEnabled {
+      return <p>You cannot change password when auth proxy authentication is enabled.</p>;
     }
 
     return (

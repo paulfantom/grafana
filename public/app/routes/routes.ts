@@ -5,7 +5,6 @@ import { applyRouteRegistrationHandlers } from './registry';
 import CreateFolderCtrl from 'app/features/folders/CreateFolderCtrl';
 import FolderDashboardsCtrl from 'app/features/folders/FolderDashboardsCtrl';
 import DashboardImportCtrl from 'app/features/manage-dashboards/DashboardImportCtrl';
-import LdapPage from 'app/features/admin/ldap/LdapPage';
 import config from 'app/core/config';
 import { route, ILocationProvider } from 'angular';
 // Types
@@ -300,12 +299,6 @@ export function setupAngularRoutes($routeProvider: route.IRouteProvider, $locati
       resolve: {
         component: () =>
           SafeDynamicImport(import(/* webpackChunkName: "ServerStats" */ 'app/features/admin/ServerStats')),
-      },
-    })
-    .when('/admin/ldap', {
-      template: '<react-container />',
-      resolve: {
-        component: () => LdapPage,
       },
     })
     // LOGIN / SIGNUP
