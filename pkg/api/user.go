@@ -345,8 +345,6 @@ func GetAuthProviderLabel(authModule string) string {
 		return "grafana.com"
 	case "auth.saml":
 		return "SAML"
-	case "ldap", "":
-		return "LDAP"
 	default:
 		return "OAuth"
 	}

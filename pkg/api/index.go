@@ -297,12 +297,6 @@ func (hs *HTTPServer) setIndexViewData(c *m.ReqContext) (*dtos.IndexViewData, er
 			{Text: "Stats", Id: "server-stats", Url: setting.AppSubUrl + "/admin/stats", Icon: "fa fa-fw fa-bar-chart"},
 		}
 
-		if setting.LDAPEnabled {
-			adminNavLinks = append(adminNavLinks, &dtos.NavLink{
-				Text: "LDAP", Id: "ldap", Url: setting.AppSubUrl + "/admin/ldap", Icon: "fa fa-fw fa-address-book-o",
-			})
-		}
-
 		data.NavTree = append(data.NavTree, &dtos.NavLink{
 			Text:         "Server Admin",
 			SubTitle:     "Manage all users & orgs",
