@@ -1,3 +1,215 @@
+v0.13.0
+=======
+
+This release solves two important issues from v1.0.0 library milestone. It has API changes, though as always it's possible to implement the same as before, and adapting new version should be pretty straightforward.
+
+* [#163](https://github.com/centrifugal/centrifuge/issues/163) Provide a way to add concurrent processing of protocol commands. Before this change protocol commands could only be processed one by one. The obvious drawback in this case is that one slow RPC could result into stopping other requests from being processed thus affecting overall latency. This required changing client handler API and use asynchronous callback style API for returning replies from event handlers. This approach while not being very idiomatic allows using whatever concurrency strategy developer wants without losing the possibility to control event order.
+* [#161](https://github.com/centrifugal/centrifuge/issues/161) Eliminating `ChannelOptionsFunc` – now all channel options can be provided when calling `Publish` operation (history size and TTL) or by returning from event handlers inside `SubscribeReply` (enabling channel presence, join/leave messages, recovery in a channel). This means that channel options can now be controlled per-connection (not only per channel as before). For example if you need admin connection to subscribe to channel but not participate in channel presence – you are able to not enable presence for that connection.  
+* Server-side subscriptions now set over `Subscriptions` map (instead of `Channels`). Again – subscribe options can be set with per-connection resolution.
+* Change signature of `Publish` method in `Broker` interface – method now accepts `[]byte` data instead of `*Publication`.  
+* Function options for `Unsubbscribe` and `Disconnect` methods now have boolean argument.
+* History functional option `WithNoLimit` removed – use `WithLimit(centrifuge.NoLimit)` instead. 
+* Config option `ClientUserConnectionLimit` renamed to `UserConnectionLimit`. If `UserConnectionLimit` set then now connection will be disconnected with `DisconnectConnectionLimit` instead of returning a `LimitExceeded` error.
+
+Since API changes are pretty big, let's look at example program and how to adapt it from v0.12.0 to v0.13.0.
+
+The program based on v0.12.0 API:
+
+```go
+package main
+
+import (
+	"context"
+
+	"github.com/centrifugal/centrifuge"
+)
+
+func main() {
+	cfg := centrifuge.DefaultConfig
+	cfg.ChannelOptionsFunc = func(channel string) (centrifuge.ChannelOptions, bool, error) {
+		return centrifuge.ChannelOptions{
+			Presence:        true,
+			JoinLeave:       true,
+			HistorySize:     100,
+			HistoryLifetime: 300,
+			HistoryRecover:  true,
+		}, true, nil
+	}
+
+	node, _ := centrifuge.New(cfg)
+
+	node.OnConnecting(func(ctx context.Context, e centrifuge.ConnectEvent) (centrifuge.ConnectReply, error) {
+		return centrifuge.ConnectReply{
+			Credentials: &centrifuge.Credentials{UserID: "42"},
+			// Subscribe to a server-side channel.
+			Channels: []string{"news"},
+		}, nil
+	})
+
+	node.OnConnect(func(c *centrifuge.Client) {
+		println("client connected")
+	})
+
+	node.OnSubscribe(func(c *centrifuge.Client, e centrifuge.SubscribeEvent) (centrifuge.SubscribeReply, error) {
+		return centrifuge.SubscribeReply{}, nil
+	})
+
+	node.OnPublish(func(c *centrifuge.Client, e centrifuge.PublishEvent) (centrifuge.PublishReply, error) {
+		return centrifuge.PublishReply{}, nil
+	})
+
+	node.OnDisconnect(func(c *centrifuge.Client, e centrifuge.DisconnectEvent) {
+		println("client disconnected")
+	})
+
+	_ = node.Run()
+}
+```
+
+With v0.13.0 the same program becomes:
+
+```go
+package main
+
+import (
+	"context"
+	"time"
+
+	"github.com/centrifugal/centrifuge"
+)
+
+func main() {
+	node, _ := centrifuge.New(centrifuge.DefaultConfig)
+
+	node.OnConnecting(func(ctx context.Context, e centrifuge.ConnectEvent) (centrifuge.ConnectReply, error) {
+		return centrifuge.ConnectReply{
+			Credentials: &centrifuge.Credentials{UserID: "42"},
+			// Subscribe to a server-side channel.
+			Subscriptions: map[string]centrifuge.SubscribeOptions{
+				"news": {Presence: true, JoinLeave: true, Recover: true},
+			},
+		}, nil
+	})
+
+	node.OnConnect(func(client *centrifuge.Client) {
+		println("client connected")
+
+		client.OnSubscribe(func(e centrifuge.SubscribeEvent, cb centrifuge.SubscribeCallback) {
+			cb(centrifuge.SubscribeReply{
+				Options: centrifuge.SubscribeOptions{
+					Presence:  true,
+					JoinLeave: true,
+					Recover:   true,
+				},
+			}, nil)
+		})
+
+		client.OnPublish(func(e centrifuge.PublishEvent, cb centrifuge.PublishCallback) {
+			// BTW you can publish here explicitly using node.Publish method – see Result
+			// field of PublishReply and chat_json example.
+			cb(centrifuge.PublishReply{
+				Options: centrifuge.PublishOptions{
+					HistorySize: 100,
+					HistoryTTL:  5 * time.Minute,
+				},
+			}, nil)
+		})
+
+		client.OnDisconnect(func(e centrifuge.DisconnectEvent) {
+			println("client disconnected")
+		})
+	})
+
+	_ = node.Run()
+}
+```
+
+As you can see there are three important changes:
+
+1) You should now set up event handlers inside `node.OnConnect` closure
+2) Event handlers now have callback argument that you should call with corresponding Reply as soon as you have it
+3) For server-side subscriptions you should now return `Subscriptions` field in `ConnectReply` which is `map[string]SubscribeOptions` instead of `[]string` slice.
+
+See [new example that demonstrates concurrency](https://github.com/centrifugal/centrifuge/tree/master/_examples/concurrency) using bounded semaphore.
+
+Note that every feature enabled for a channel increases resource usage on a server. You should only enable presence, recovery, join/leave features and maintaining history in channels where this is necessary.
+
+See also updated [Tips and tricks](https://github.com/centrifugal/centrifuge#tips-and-tricks) section in a README – it now contains information about connection life cycle and event handler concurrency. 
+
+v0.12.0
+=======
+
+This release is a step back in Engine separation and has some important fixes and improvements. Backwards incompatible changes are all about Engine interfaces so if you are using built-in Memory or Redis engines you should be fine to upgrade. Otherwise, take a closer look on first and second points below.
+
+* `HistoryManager` interface removed and its methods now part of `Broker` interface{}. The reason behind this is that Broker should be responsible for an atomicity of saving message into history stream and publish to PUB/SUB. More details in [#158](https://github.com/centrifugal/centrifuge/pull/158)
+* Cleaner `Broker` interface methods without `ChannelOptions`
+* Fix reconnects due to `InsufficientState` errors in channels with `HistoryRecover` option on when using Memory Engine and frequently publishing in parallel (from different goroutines)
+* Fix reconnects due to `InsufficientState` errors when using legacy seq, gen fields - [#157](https://github.com/centrifugal/centrifuge/pull/157)
+* Fix returning custom disconnect for SockJS transport
+* Possibility to define history stream options in `Publish` call
+* Deprecate Broker/Engine `Channels` method – see [#147](https://github.com/centrifugal/centrifuge/issues/147)
+* Increase test coverage up to 83% so [#106](https://github.com/centrifugal/centrifuge/issues/106) is finally closed
+* Test Sentinel scenario in CI
+* Refactor queue writer to prevent possible message loss on connection close - [160](https://github.com/centrifugal/centrifuge/pull/160)
+* Fix inconsistent tests of Redis Cluster recovery due to PUB/SUB buffering
+* Minor improvements in Gin auth example - [#154](https://github.com/centrifugal/centrifuge/pull/154)
+
+I have a plan for future library versions to remove `ChannelOptionFunc` completely (but still have a control over channel feature set). This is still in research – if you are interested welcome to [#161](https://github.com/centrifugal/centrifuge/issues/161).
+
+```
+$ gorelease -base v0.11.2 -version v0.12.0
+github.com/centrifugal/centrifuge
+---------------------------------
+Incompatible changes:
+- (*MemoryEngine).AddHistory: removed
+- (*MemoryEngine).Publish: changed from func(string, *Publication, *ChannelOptions) error to func(string, *Publication, PublishOptions) (StreamPosition, error)
+- (*MemoryEngine).PublishJoin: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- (*MemoryEngine).PublishLeave: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- (*Node).SetHistoryManager: removed
+- (*RedisEngine).AddHistory: removed
+- (*RedisEngine).Publish: changed from func(string, *Publication, *ChannelOptions) error to func(string, *Publication, PublishOptions) (StreamPosition, error)
+- (*RedisEngine).PublishJoin: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- (*RedisEngine).PublishLeave: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- Broker.History: added
+- Broker.Publish: changed from func(string, *Publication, *ChannelOptions) error to func(string, *Publication, PublishOptions) (StreamPosition, error)
+- Broker.PublishJoin: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- Broker.PublishLeave: changed from func(string, *ClientInfo, *ChannelOptions) error to func(string, *ClientInfo) error
+- Broker.RemoveHistory: added
+- HistoryManager.AddHistory, method set of Engine: removed
+- HistoryManager: removed
+- MemoryEngine: old is comparable, new is not
+- PublishOptions.SkipHistory: removed
+- RedisEngineConfig.PublishOnHistoryAdd: removed
+Compatible changes:
+- PublishOptions.HistorySize: added
+- PublishOptions.HistoryTTL: added
+- WithHistory: added
+
+v0.12.0 is a valid semantic version for this release.
+```
+
+v0.11.2
+=======
+
+* Fix non-working websocket close with custom disconnect code: this is a regression introduced by v0.11.0.
+
+v0.11.1
+=======
+
+* Added `MetricsNamespace` field of `Config` to configure Prometheus metrics namespace used by Centrifuge library internal metrics
+* Fix `messages_sent_counter` – it now correctly counts Control, Join and Leave messages
+* Redis cluster integration now tested in CI
+
+```
+$ gorelease -base v0.11.0 -version v0.11.1
+github.com/centrifugal/centrifuge
+---------------------------------
+Compatible changes:
+- Config.MetricsNamespace: added
+
+v0.11.1 is a valid semantic version for this release.
+```
+
 v0.11.0
 =======
 

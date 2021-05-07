@@ -16,6 +16,9 @@ import (
 	"xorm.io/core"
 )
 
+// ErrNoElementsOnSlice represents an error there is no element when insert
+var ErrNoElementsOnSlice = errors.New("No element on slice when insert")
+
 // Insert insert one or more beans
 func (session *Session) Insert(beans ...interface{}) (int64, error) {
 	var affected int64
@@ -67,21 +70,23 @@ func (session *Session) Insert(beans ...interface{}) (int64, error) {
 			sliceValue := reflect.Indirect(reflect.ValueOf(bean))
 			if sliceValue.Kind() == reflect.Slice {
 				size := sliceValue.Len()
-				if size > 0 {
-					if session.engine.SupportInsertMany() {
-						cnt, err := session.innerInsertMulti(bean)
+				if size <= 0 {
+					return 0, ErrNoElementsOnSlice
+				}
+
+				if session.engine.SupportInsertMany() {
+					cnt, err := session.innerInsertMulti(bean)
+					if err != nil {
+						return affected, err
+					}
+					affected += cnt
+				} else {
+					for i := 0; i < size; i++ {
+						cnt, err := session.innerInsert(sliceValue.Index(i).Interface())
 						if err != nil {
 							return affected, err
 						}
 						affected += cnt
-					} else {
-						for i := 0; i < size; i++ {
-							cnt, err := session.innerInsert(sliceValue.Index(i).Interface())
-							if err != nil {
-								return affected, err
-							}
-							affected += cnt
-						}
 					}
 				}
 			} else {
@@ -674,7 +679,7 @@ func (session *Session) genInsertColumns(bean interface{}) ([]string, []interfac
 
 		// !evalphobia! set fieldValue as nil when column is nullable and zero-value
 		if _, ok := getFlagForColumn(session.statement.nullableMap, col); ok {
-			if col.Nullable && isZero(fieldValue.Interface()) {
+			if col.Nullable && isZeroValue(fieldValue) {
 				var nilValue *int
 				fieldValue = reflect.ValueOf(nilValue)
 			}
@@ -729,66 +734,7 @@ func (session *Session) insertMapInterface(m map[string]interface{}) (int64, err
 		args = append(args, m[colName])
 	}
 
-	w := builder.NewWriter()
-	if session.statement.cond.IsValid() {
-		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (", session.engine.Quote(tableName))); err != nil {
-			return 0, err
-		}
-
-		if err := writeStrings(w, append(columns, exprs.colNames...), "`", "`"); err != nil {
-			return 0, err
-		}
-
-		if _, err := w.WriteString(") SELECT "); err != nil {
-			return 0, err
-		}
-
-		if err := session.statement.writeArgs(w, args); err != nil {
-			return 0, err
-		}
-
-		if len(exprs.args) > 0 {
-			if _, err := w.WriteString(","); err != nil {
-				return 0, err
-			}
-			if err := exprs.writeArgs(w); err != nil {
-				return 0, err
-			}
-		}
-
-		if _, err := w.WriteString(fmt.Sprintf(" FROM %s WHERE ", session.engine.Quote(tableName))); err != nil {
-			return 0, err
-		}
-
-		if err := session.statement.cond.WriteTo(w); err != nil {
-			return 0, err
-		}
-	} else {
-		qm := strings.Repeat("?,", len(columns))
-		qm = qm[:len(qm)-1]
-
-		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (`%s`) VALUES (%s)", session.engine.Quote(tableName), strings.Join(columns, "`,`"), qm)); err != nil {
-			return 0, err
-		}
-		w.Append(args...)
-	}
-
-	sql := w.String()
-	args = w.Args()
-
-	if err := session.cacheInsert(tableName); err != nil {
-		return 0, err
-	}
-
-	res, err := session.exec(sql, args...)
-	if err != nil {
-		return 0, err
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	return affected, nil
+	return session.insertMap(columns, args)
 }
 
 func (session *Session) insertMapString(m map[string]string) (int64, error) {
@@ -808,6 +754,7 @@ func (session *Session) insertMapString(m map[string]string) (int64, error) {
 			columns = append(columns, k)
 		}
 	}
+
 	sort.Strings(columns)
 
 	var args = make([]interface{}, 0, len(m))
@@ -815,7 +762,18 @@ func (session *Session) insertMapString(m map[string]string) (int64, error) {
 		args = append(args, m[colName])
 	}
 
+	return session.insertMap(columns, args)
+}
+
+func (session *Session) insertMap(columns []string, args []interface{}) (int64, error) {
+	tableName := session.statement.TableName()
+	if len(tableName) <= 0 {
+		return 0, ErrTableNotFound
+	}
+
+	exprs := session.statement.exprColumns
 	w := builder.NewWriter()
+	// if insert where
 	if session.statement.cond.IsValid() {
 		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (", session.engine.Quote(tableName))); err != nil {
 			return 0, err
@@ -853,10 +811,29 @@ func (session *Session) insertMapString(m map[string]string) (int64, error) {
 		qm := strings.Repeat("?,", len(columns))
 		qm = qm[:len(qm)-1]
 
-		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (`%s`) VALUES (%s)", session.engine.Quote(tableName), strings.Join(columns, "`,`"), qm)); err != nil {
+		if _, err := w.WriteString(fmt.Sprintf("INSERT INTO %s (", session.engine.Quote(tableName))); err != nil {
 			return 0, err
 		}
+
+		if err := writeStrings(w, append(columns, exprs.colNames...), "`", "`"); err != nil {
+			return 0, err
+		}
+		if _, err := w.WriteString(fmt.Sprintf(") VALUES (%s", qm)); err != nil {
+			return 0, err
+		}
+
 		w.Append(args...)
+		if len(exprs.args) > 0 {
+			if _, err := w.WriteString(","); err != nil {
+				return 0, err
+			}
+			if err := exprs.writeArgs(w); err != nil {
+				return 0, err
+			}
+		}
+		if _, err := w.WriteString(")"); err != nil {
+			return 0, err
+		}
 	}
 
 	sql := w.String()

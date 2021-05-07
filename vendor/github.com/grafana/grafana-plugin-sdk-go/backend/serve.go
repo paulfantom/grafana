@@ -21,7 +21,7 @@ type GRPCSettings struct {
 	MaxSendMsgSize int
 }
 
-//ServeOpts options for serving plugins.
+// ServeOpts options for serving plugins.
 type ServeOpts struct {
 	// CheckHealthHandler handler for health checks.
 	CheckHealthHandler CheckHealthHandler
@@ -33,11 +33,6 @@ type ServeOpts struct {
 	// QueryDataHandler handler for data queries.
 	// Required to implement if data source.
 	QueryDataHandler QueryDataHandler
-
-	// TransformDataHandler handler for data transformations.
-	// Very experimental and shouldn't be implemented in most cases.
-	// Optional to implement.
-	TransformDataHandler TransformDataHandler
 
 	// GRPCSettings settings for gPRC.
 	GRPCSettings GRPCSettings
@@ -55,10 +50,6 @@ func Serve(opts ServeOpts) error {
 
 	if opts.QueryDataHandler != nil {
 		pluginOpts.DataServer = newDataSDKAdapter(opts.QueryDataHandler)
-	}
-
-	if opts.TransformDataHandler != nil {
-		pluginOpts.TransformServer = newTransformSDKAdapter(opts.TransformDataHandler)
 	}
 
 	grpc_prometheus.EnableHandlingTimeHistogram()

@@ -168,7 +168,7 @@ func newSockJSHandler(s *SockjsHandler, sockjsPrefix string, sockjsOpts sockjs.O
 
 // sockJSHandler called when new client connection comes to SockJS endpoint.
 func (s *SockjsHandler) sockJSHandler(sess sockjs.Session) {
-	transportConnectCount.WithLabelValues(transportSockJS).Inc()
+	incTransportConnect(transportSockJS)
 
 	// Separate goroutine for better GC of caller's data.
 	go func() {
@@ -194,14 +194,29 @@ func (s *SockjsHandler) sockJSHandler(sess sockjs.Session) {
 			s.node.logger.log(newLogEntry(LogLevelDebug, "client connection completed", map[string]interface{}{"client": c.ID(), "transport": transportSockJS, "duration": time.Since(started)}))
 		}(time.Now())
 
+		var needWaitLoop bool
+
 		for {
 			if msg, err := sess.Recv(); err == nil {
 				if ok := c.Handle([]byte(msg)); !ok {
-					return
+					needWaitLoop = true
+					break
 				}
 				continue
 			}
 			break
+		}
+
+		if needWaitLoop {
+			// One extra loop till we get an error from session,
+			// this is required to wait until close frame will be sent
+			// into connection inside Client implementation and transport
+			// closed with proper disconnect reason.
+			for {
+				if _, err := sess.Recv(); err != nil {
+					break
+				}
+			}
 		}
 	}()
 }

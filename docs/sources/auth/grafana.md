@@ -2,11 +2,6 @@
 title = "Grafana Authentication"
 description = "Grafana OAuthentication Guide "
 keywords = ["grafana", "configuration", "documentation", "oauth"]
-type = "docs"
-[menu.docs]
-name = "GitLab"
-identifier = "grafana-oauth"
-parent = "authentication"
 weight = 100
 +++
 
@@ -57,7 +52,7 @@ api_key_max_seconds_to_live = -1
 
 ### Anonymous authentication
 
-You can make Grafana accessible without any login required by enabling anonymous access in the configuration file.
+You can make Grafana accessible without any login required by enabling anonymous access in the configuration file. For more information, refer to [Implications of allowing anonymous access to dashboards]({{< relref "../administration/security.md" >}}).
 
 Example:
 

@@ -15,8 +15,20 @@ type FieldConfig struct {
 
 	// DisplayName overrides Grafana default naming, should not be used from a data source
 	DisplayName string `json:"displayName,omitempty"`
+
 	// DisplayNameFromDS overrides Grafana default naming in a better way that allows users to override it easily.
 	DisplayNameFromDS string `json:"displayNameFromDS,omitempty"`
+
+	// Path is an explicit path to the field in the datasource. When the frame meta includes a path,
+	// this will default to `${frame.meta.path}/${field.name}
+	//
+	// When defined, this value can be used as an identifier within the datasource scope, and
+	// may be used as an identifier to update values in a subsequent request
+	Path string `json:"path,omitempty"`
+
+	// Description is human readable field metadata
+	Description string `json:"description,omitempty"`
+
 	// Filterable indicates if the Field's data can be filtered by additional calls.
 	Filterable *bool `json:"filterable,omitempty"`
 
@@ -136,10 +148,9 @@ const (
 
 // ValueMapping convert input value to something else
 type ValueMapping struct {
-	ID       int16       `json:"id"`
-	Operator string      `json:"operator"`
-	Text     string      `json:"title"`
-	Type     MappingType `json:"type"`
+	ID   int16       `json:"id,omitempty"`
+	Text string      `json:"text,omitempty"`
+	Type MappingType `json:"type,omitempty"`
 
 	// Only valid for MappingType == ValueMap
 	Value string `json:"value,omitempty"`

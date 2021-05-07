@@ -6,12 +6,11 @@ import (
 	"google.golang.org/grpc"
 )
 
-//ServeOpts options for serving plugins.
+// ServeOpts contains options for serving plugins.
 type ServeOpts struct {
 	DiagnosticsServer DiagnosticsServer
 	ResourceServer    ResourceServer
 	DataServer        DataServer
-	TransformServer   TransformServer
 
 	// GRPCServer factory method for creating GRPC server.
 	// If nil, the default one will be used.
@@ -38,12 +37,6 @@ func Serve(opts ServeOpts) error {
 	if opts.DataServer != nil {
 		pSet["data"] = &DataGRPCPlugin{
 			DataServer: opts.DataServer,
-		}
-	}
-
-	if opts.TransformServer != nil {
-		pSet["transform"] = &TransformGRPCPlugin{
-			TransformServer: opts.TransformServer,
 		}
 	}
 
